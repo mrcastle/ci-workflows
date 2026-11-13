@@ -1,5 +1,7 @@
 name: run-check
-description: Run one check command. On failure, upload the tail of its output for the PR report.
+description: >-
+  Run one check command. On failure, upload a fragment for the PR report: the markdown the
+  command wrote to $CI_REPORT_MD if any (e.g. a findings table), otherwise the tail of its output.
 
 inputs:
   name:
@@ -22,16 +24,24 @@ runs:
         RUN: ${{ inputs.run }}
       run: |
         log="$RUNNER_TEMP/check.log" rc=0
+        export CI_REPORT_MD="$RUNNER_TEMP/check-report.md"
+        rm -f "$CI_REPORT_MD"
         echo "\$ $RUN"
         bash -euo pipefail -c "$RUN" < /dev/null 2>&1 | tee "$log" || rc=$?
+        [[ -s "$CI_REPORT_MD" ]] && cat "$CI_REPORT_MD" >> "$GITHUB_STEP_SUMMARY"
         if (( rc != 0 )); then
           mkdir -p "$RUNNER_TEMP/ci-report"
           {
             echo "<details><summary>❌ <b>$NAME</b> (exit $rc)</summary>"
-            echo; echo '````'
-            echo "\$ $RUN"
-            tail -n 60 "$log" | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g'
-            echo '````'; echo "</details>"
+            echo
+            if [[ -s "$CI_REPORT_MD" ]]; then cat "$CI_REPORT_MD"
+            else
+              echo '````'
+              echo "\$ $RUN"
+              tail -n 60 "$log" | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g'
+              echo '````'
+            fi
+            echo; echo "</details>"
           } > "$RUNNER_TEMP/ci-report/$NAME.md"
           echo "::error title=$NAME failed::exit $rc"
         fi

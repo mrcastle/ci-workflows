@@ -1,0 +1,32 @@
+name: scanners
+description: Install one checksum-verified scanner binary and expose the wrapper scripts as $CI_SCANNERS.
+
+inputs:
+  bin:
+    description: Binary name on PATH.
+    required: true
+  url:
+    description: Release download URL (raw binary or .tar.gz).
+    required: true
+  sha256:
+    description: Expected SHA256 of the download.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install ${{ inputs.bin }}
+      shell: bash
+      env:
+        BIN: ${{ inputs.bin }}
+        URL: ${{ inputs.url }}
+        SHA256: ${{ inputs.sha256 }}
+        SCRIPTS: ${{ github.action_path }}
+      run: |
+        mkdir -p "$RUNNER_TEMP/bin" && cd "$RUNNER_TEMP"
+        curl -fsSLo download "$URL"
+        echo "$SHA256  download" | sha256sum -c -
+        if [[ "$URL" == *.tar.gz ]]; then tar -xzf download -C bin "$BIN"; else mv download "bin/$BIN"; fi
+        chmod +x "bin/$BIN"
+        echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+        echo "CI_SCANNERS=$SCRIPTS" >> "$GITHUB_ENV"

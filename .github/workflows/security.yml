@@ -2,6 +2,7 @@
 #   osv      - known-vulnerable dependencies in lockfiles (OSV-Scanner)
 #   zizmor   - GitHub Actions workflow security
 #   gitleaks - leaked secrets (PR commits on pull_request, full history otherwise)
+# Wrapper scripts live in actions/scanners/.
 #
 # Tool binaries are pinned by version + SHA256 here; Dependabot can't bump them (see README).
 
@@ -29,38 +30,27 @@ jobs:
             url: https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64
             sha256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
             depth: 1
-            # Exit 128 = no lockfiles found: nothing to scan, not a failure.
-            run: osv-scanner scan source --recursive --format markdown . || [ $? -eq 128 ]
           - name: zizmor
             bin: zizmor
             url: https://github.com/zizmorcore/zizmor/releases/download/v1.31.1/zizmor-x86_64-unknown-linux-gnu.tar.gz
             sha256: d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99
             depth: 1
-            run: zizmor --format plain .
           - name: gitleaks
             bin: gitleaks
             url: https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
             sha256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
             depth: 0
-            run: gitleaks git --redact --no-banner ${BASE:+"--log-opts=$BASE..$HEAD"} .
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: ${{ matrix.depth }}
 
-      - name: Install ${{ matrix.bin }}
-        env:
-          BIN: ${{ matrix.bin }}
-          URL: ${{ matrix.url }}
-          SHA256: ${{ matrix.sha256 }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/bin" && cd "$RUNNER_TEMP"
-          curl -fsSLo download "$URL"
-          echo "$SHA256  download" | sha256sum -c -
-          if [[ "$URL" == *.tar.gz ]]; then tar -xzf download -C bin "$BIN"; else mv download "bin/$BIN"; fi
-          chmod +x "bin/$BIN"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - uses: $/actions/scanners
+        with:
+          bin: ${{ matrix.bin }}
+          url: ${{ matrix.url }}
+          sha256: ${{ matrix.sha256 }}
 
       - uses: $/actions/run-check
         env:
@@ -69,4 +59,4 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         with:
           name: ${{ matrix.name }}
-          run: ${{ matrix.run }}
+          run: bash "$CI_SCANNERS/${{ matrix.name }}.sh"
