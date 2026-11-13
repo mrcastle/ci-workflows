@@ -37,13 +37,11 @@ jobs:
           [[ -n "$PR" ]] || { echo "Not a pull_request run; nothing to report."; exit 0; }
           marker='<!-- ci-workflows:report -->'
 
-          # Finished, non-skipped jobs, minus a successful plan job. Names are "caller / ... / check".
-          # shellcheck disable=SC2016 # $n is a jq variable
+          # Finished, non-skipped jobs, minus successful plan jobs. Names look like "ci / lint".
           gh api "$JOBS_API" --paginate --jq '.jobs[]
             | select(.status == "completed" and .conclusion != "skipped")
-            | (.name | split(" / ") | last) as $n
-            | select(($n == "plan" and .conclusion == "success") | not)
-            | [$n, .conclusion, .html_url] | @tsv' > jobs.tsv
+            | select((.conclusion == "success" and (.name | endswith("/ plan"))) | not)
+            | [.name, .conclusion, .html_url] | @tsv' | sort > jobs.tsv
           total=$(wc -l < jobs.tsv)
           failed=$(awk -F'\t' '$2 != "success"' jobs.tsv | wc -l)
           (( total > 0 )) || exit 0
