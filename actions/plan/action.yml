@@ -1,5 +1,5 @@
 name: plan
-description: Parse "name: command" lines into a JSON matrix of checks, one job per check.
+description: 'Parse "name: command" lines into a JSON matrix of checks, one job per check.'
 
 inputs:
   checks:

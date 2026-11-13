@@ -39,6 +39,9 @@ jobs:
           "$RUNNER_TEMP/actionlint" -color \
             -ignore 'specifying action "\$/' \
             -ignore 'reusable workflow call "\$/'
+      # actionlint doesn't read composite actions; at least make sure they parse.
+      - name: actions parse
+        run: for f in actions/*/action.yml; do yq e . "$f" > /dev/null || exit 1; done
 
   node:
     permissions:

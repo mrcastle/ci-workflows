@@ -38,6 +38,7 @@ jobs:
           marker='<!-- ci-workflows:report -->'
 
           # Finished, non-skipped jobs, minus a successful plan job. Names are "caller / ... / check".
+          # shellcheck disable=SC2016 # $n is a jq variable
           gh api "$JOBS_API" --paginate --jq '.jobs[]
             | select(.status == "completed" and .conclusion != "skipped")
             | (.name | split(" / ") | last) as $n
