@@ -1,0 +1,78 @@
+# Reusable: install a Node project once, then run the caller's checks.
+# Usage and inputs: README.md. The checks loop is identical in rust.yml.
+
+name: node
+
+on:
+  workflow_call:
+    inputs:
+      checks:
+        description: 'One "name: command" per line, e.g. "lint: npm run lint". Runs in order; all run even if one fails.'
+        type: string
+        required: true
+      node-version:
+        description: Node version. Ignored when node-version-file is set.
+        type: string
+        default: lts/*
+      node-version-file:
+        description: File to read the Node version from (e.g. .nvmrc), relative to working-directory.
+        type: string
+        default: ""
+      install-command:
+        description: Install command. Lifecycle scripts are off by default; drop --ignore-scripts if the project needs them (e.g. Prisma).
+        type: string
+        default: npm ci --ignore-scripts
+      working-directory:
+        type: string
+        default: "."
+      timeout-minutes:
+        type: number
+        default: 10
+
+permissions: {}
+
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version-file == '' && inputs.node-version || '' }}
+          node-version-file: ${{ inputs.node-version-file != '' && format('{0}/{1}', inputs.working-directory, inputs.node-version-file) || '' }}
+
+      - name: Install
+        env:
+          INSTALL: ${{ inputs.install-command }}
+        run: bash -euo pipefail -c "$INSTALL"
+
+      - name: Checks
+        env:
+          CHECKS: ${{ inputs.checks }}
+        run: |
+          failed=0
+          printf '| Check | Result | Time |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r line; do
+            [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+            if [[ ! "$line" =~ ^[[:space:]]*([A-Za-z0-9_.-]+):[[:space:]]*(.+)$ ]]; then
+              echo "::error::Invalid checks line (want \"name: command\"): $line"; failed=1; continue
+            fi
+            name="${BASH_REMATCH[1]}" cmd="${BASH_REMATCH[2]}" start=$SECONDS
+            echo "::group::$name: $cmd"
+            if bash -euo pipefail -c "$cmd" < /dev/null; then result="✅ pass"
+            else result="❌ fail"; failed=1; echo "::error title=$name failed::$cmd"; fi
+            echo "::endgroup::"
+            echo "| $name | $result | $((SECONDS - start))s |" >> "$GITHUB_STEP_SUMMARY"
+          done <<< "$CHECKS"
+          exit "$failed"

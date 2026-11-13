@@ -1,0 +1,72 @@
+# Reusable: set up a Rust toolchain + build cache once, then run the caller's checks.
+# Usage and inputs: README.md. The checks loop is identical in node.yml.
+
+name: rust
+
+on:
+  workflow_call:
+    inputs:
+      checks:
+        description: 'One "name: command" per line, e.g. "clippy: cargo clippy --all-targets -- -D warnings". Runs in order; all run even if one fails.'
+        type: string
+        required: true
+      toolchain:
+        description: Toolchain to install. A rust-toolchain.toml in the repo takes precedence.
+        type: string
+        default: stable
+      working-directory:
+        type: string
+        default: "."
+      timeout-minutes:
+        type: number
+        default: 15
+
+permissions: {}
+
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # rustup is preinstalled on GitHub's Ubuntu runners; no third-party toolchain action needed.
+      - name: Install toolchain
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+        run: |
+          rustup toolchain install "$TOOLCHAIN" --profile minimal --component rustfmt,clippy
+          rustup default "$TOOLCHAIN"
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: ${{ inputs.working-directory }}
+
+      - name: Checks
+        env:
+          CHECKS: ${{ inputs.checks }}
+        run: |
+          failed=0
+          printf '| Check | Result | Time |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r line; do
+            [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+            if [[ ! "$line" =~ ^[[:space:]]*([A-Za-z0-9_.-]+):[[:space:]]*(.+)$ ]]; then
+              echo "::error::Invalid checks line (want \"name: command\"): $line"; failed=1; continue
+            fi
+            name="${BASH_REMATCH[1]}" cmd="${BASH_REMATCH[2]}" start=$SECONDS
+            echo "::group::$name: $cmd"
+            if bash -euo pipefail -c "$cmd" < /dev/null; then result="✅ pass"
+            else result="❌ fail"; failed=1; echo "::error title=$name failed::$cmd"; fi
+            echo "::endgroup::"
+            echo "| $name | $result | $((SECONDS - start))s |" >> "$GITHUB_STEP_SUMMARY"
+          done <<< "$CHECKS"
+          exit "$failed"

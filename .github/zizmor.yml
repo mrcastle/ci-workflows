@@ -1,0 +1,6 @@
+rules:
+  # GitHub's `$/` self-repository syntax (Jul 2026) isn't supported by actionlint
+  # 1.7.12 yet (rhysd/actionlint#711), and `./` is correct for same-repo calls.
+  # Revisit when actionlint supports it.
+  self-repository:
+    disable: true

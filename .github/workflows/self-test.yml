@@ -1,0 +1,71 @@
+# CI for this repo: lint the workflows, then run each reusable workflow for real
+# against the fixtures. Public repo, so these minutes are free.
+
+name: self-test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACTIONLINT_VERSION: 1.7.12
+  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        run: |
+          tgz="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLo "$RUNNER_TEMP/$tgz" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$tgz"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tgz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+      # node.yml and rust.yml carry the same checks loop; fail if they drift.
+      - name: checks loop in sync
+        run: |
+          diff <(sed -n '/- name: Checks/,$p' .github/workflows/node.yml) <(sed -n '/- name: Checks/,$p' .github/workflows/rust.yml)
+
+  node:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/node.yml
+    with:
+      working-directory: fixtures/node
+      node-version-file: .nvmrc
+      checks: |
+        lint: npm run lint
+        test-unit: npm test
+
+  rust:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rust.yml
+    with:
+      working-directory: fixtures/rust
+      checks: |
+        fmt: cargo fmt --check
+        clippy: cargo clippy --all-targets --locked -- -D warnings
+        test-unit: cargo test --lib --locked
+        test-integration: cargo test --test '*' --locked
+
+  security:
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/security.yml
