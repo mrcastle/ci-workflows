@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.0.0 (unreleased)
+## v1.0.0 (2026-11-13)
 
 - `node.yml`: installs once, then runs the caller's `checks` list.
 - `rust.yml`: sets up the toolchain and rust-cache, then runs the caller's `checks` list.
