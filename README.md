@@ -1,16 +1,25 @@
 # ci-workflows
 
-Reusable GitHub Actions workflows for PR checks: lint, tests by type, and security scanning. They're hardened by default and designed to fit the GitHub Free minutes budget.
+Reusable GitHub Actions workflows for PR checks. Each repo lists its own commands, and every command runs as its own job, so each one is a separate check on the PR with its own node in the workflow graph and its own log. Security scanning is built in, and one PR comment summarizes the results.
 
-| Workflow | Runs | Job time limit |
-|---|---|---|
-| `node.yml` | Installs once, then runs your checks | 10 min |
-| `rust.yml` | Sets up the toolchain and build cache once, then runs your checks | 15 min |
-| `security.yml` | [OSV-Scanner](https://google.github.io/osv-scanner/) for vulnerable dependencies, [zizmor](https://docs.zizmor.sh) for workflow security, [gitleaks](https://github.com/gitleaks/gitleaks) for leaked secrets | 5 min |
+```
+          ┌─▶ ci / lint ───────┐
+ci / plan ┼─▶ ci / typecheck ──┤
+          └─▶ ci / build ──────┤
+security ───▶ osv ─────────────┼──▶ report / comment
+         ───▶ zizmor ──────────┤
+         ───▶ gitleaks ────────┘
+```
+
+| Workflow | What it does |
+|---|---|
+| `node.yml` / `rust.yml` | Turns the caller's `checks` list into one job per check. Each job sets up the toolchain, installs dependencies and runs one command |
+| `security.yml` | One job per scanner: [OSV-Scanner](https://google.github.io/osv-scanner/) for vulnerable dependencies, [zizmor](https://docs.zizmor.sh) for workflow security, [gitleaks](https://github.com/gitleaks/gitleaks) for leaked secrets. It never installs or runs repo code |
+| `report.yml` | Keeps one PR comment in sync with the run: a results table that links to each job, plus details for each failure |
 
 ## Usage
 
-Add `.github/workflows/pr-checks.yml` to a repo:
+Add `.github/workflows/pr-checks.yml`:
 
 ```yaml
 name: pr-checks
@@ -18,7 +27,7 @@ name: pr-checks
 on:
   pull_request:
   schedule:
-    - cron: "0 7 * * 1" # weekly: catch new CVEs in unchanged lockfiles
+    - cron: "0 7 * * 1" # weekly: security only, to catch new CVEs in unchanged lockfiles
   workflow_dispatch:
 
 permissions: {}
@@ -28,7 +37,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  node:
+  ci:
     if: github.event_name != 'schedule'
     permissions:
       contents: read
@@ -38,7 +47,6 @@ jobs:
         lint: npm run lint
         typecheck: npx tsc --noEmit
         test-unit: npm run test:unit
-        test-integration: npm run test:integration
         build: npm run build
 
   security:
@@ -46,9 +54,17 @@ jobs:
       contents: read
       actions: read
     uses: mrcastle/ci-workflows/.github/workflows/security.yml@<sha> # v1.0.0
+
+  report:
+    needs: [ci, security]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    permissions:
+      actions: read
+      pull-requests: write
+    uses: mrcastle/ci-workflows/.github/workflows/report.yml@<sha> # v1.0.0
 ```
 
-For Rust, swap the `node` job for this:
+For Rust, swap the `ci` job's workflow:
 
 ```yaml
     uses: mrcastle/ci-workflows/.github/workflows/rust.yml@<sha> # v1.0.0
@@ -60,7 +76,9 @@ For Rust, swap the `node` job for this:
         test-integration: cargo test --test '*' --locked
 ```
 
-Pin by commit SHA (zizmor's default policy requires it). Then add `.github/dependabot.yml`, and Dependabot will bump the SHA and the `# vX.Y.Z` comment together:
+A repo with both stacks can call `node.yml` and `rust.yml` as two jobs, and list both in `report`'s `needs`.
+
+**Pinning and updates.** Pin by commit SHA, since zizmor's default policy requires it. Then add `.github/dependabot.yml`, and Dependabot will bump the SHA and the `# vX.Y.Z` comment together:
 
 ```yaml
 version: 2
@@ -71,94 +89,110 @@ updates:
     cooldown: { default-days: 14 }
 ```
 
-### How `checks` works
+### `checks`
 
-Each line is `name: command`. Blank lines and lines starting with `#` are skipped.
+**Format.** One `name: command` per line. Blank lines and `#` comments are skipped.
 
-- Every check runs even if an earlier one fails, so a single run reports every failure.
-- Each check gets its own collapsible log group and a row in the job summary.
-- The job fails if any check failed.
-- Commands run from `working-directory` with `bash -euo pipefail`, using the same commands you run locally.
+**Names.** Each name becomes a job (`ci / <name>`), so names must be unique and can't be `osv`, `zizmor` or `gitleaks`.
+
+**How commands run.** Each command runs from `working-directory` with `bash -euo pipefail`, using the same command you'd run locally.
+
+**Custom failure details.** By default a failing check's PR comment section shows the end of its output. A command can write markdown to `$CI_REPORT_MD` (a findings table, say) to show that instead. The security scanners do this.
 
 ### Inputs
 
 | Input | Workflow | Default | Purpose |
 |---|---|---|---|
-| `checks` | node, rust | required | The checks to run, one `name: command` per line |
+| `checks` | node, rust | required | The checks to run |
 | `working-directory` | node, rust | `.` | Project root, for monorepos |
-| `timeout-minutes` | node, rust | 10 / 15 | Job time limit |
-| `node-version` | node | `lts/*` | Node version, ignored when `node-version-file` is set |
+| `timeout-minutes` | node, rust | 10 / 15 | Time limit for each check job |
+| `node-version` | node | `lts/*` | Ignored when `node-version-file` is set |
 | `node-version-file` | node | none | Read the version from a file such as `.nvmrc` |
-| `install-command` | node | `npm ci --ignore-scripts` | Dependency install. Remove `--ignore-scripts` if you need postinstall, e.g. Prisma |
+| `install-command` | node | `npm ci --ignore-scripts --no-audit --no-fund` | Drop `--ignore-scripts` if you need postinstall (e.g. Prisma) |
 | `toolchain` | rust | `stable` | A `rust-toolchain.toml` in the repo takes precedence |
-| `scan-path` | security | `.` | Directory scanned for lockfiles |
 
-### Security results and exceptions
+### The PR comment
 
-- **OSV-Scanner:** fails on known vulnerabilities and puts a report in the job summary.
-  - To accept a vulnerability, add it to `osv-scanner.toml` with a reason and an expiry:
-    ```toml
-    [[IgnoredVulns]]
-    id = "GHSA-xxxx-xxxx-xxxx"
-    ignoreUntil = 2027-01-01
-    reason = "Dev-only dependency, not reachable"
-    ```
-  - Repos with no lockfiles pass with a notice.
-- **zizmor:** findings appear as annotations on the PR. Configure it with `.github/zizmor.yml`.
-- **gitleaks:** on a PR it scans only that PR's commits. On scheduled runs it scans the full history. Allowlist false positives in `.gitleaksignore`.
+- **When it's posted:** the first time a run has a failure.
+- **After that:** it's updated on every run, including passing ones, which turns it into "✅ all N checks passed". So it's never stale.
+- **The results table** comes from the Jobs API, so setup failures and cancellations show too.
+- **Failure details:**
+
+| Check | Shows |
+|---|---|
+| osv | Vulnerability table |
+| zizmor | Findings by severity, with doc links and `file:line` |
+| gitleaks | Rule, file, line and commit. Secrets are never shown |
+| Your own checks | The end of the output, or the markdown they wrote to `$CI_REPORT_MD` |
+
+### Security exceptions
+
+**OSV.** Add the vulnerability to `osv-scanner.toml` with a reason and an expiry:
+
+```toml
+[[IgnoredVulns]]
+id = "GHSA-xxxx-xxxx-xxxx"
+ignoreUntil = 2027-01-01
+reason = "Dev-only dependency, not reachable"
+```
+
+Repos with no lockfiles pass.
+
+**zizmor.** Configure it in `.github/zizmor.yml`.
+
+**gitleaks.** Allowlist false positives in `.gitleaksignore`. On a PR it scans only the PR's commits. Scheduled runs scan the full history.
 
 ## Design
 
-**The repo owns *what* runs, and the shared workflow owns *how*.** Each repo lists its own commands, so any CI failure can be reproduced locally. The shared workflows provide setup, hardening and reporting.
+**One job per check.**
+- Every check is a native PR check with its own log, and the checks run in parallel.
+- Each job repeats checkout and install, so a run bills roughly one minute per check. That's about 8 minutes for a typical Node repo, comfortably inside GitHub Free's 2,000 private minutes a month.
+- Keeping the Actions spending limit at $0 means going over pauses runs instead of charging.
 
-**Built for GitHub Free:**
-- **One job per stack.** GitHub [bills each job rounded up to the minute](https://docs.github.com/en/billing/reference/actions-runner-pricing), and every job is a new runner that repeats checkout and install. Lint, typecheck and every test type share a single install.
-- **PR-only checks.** There's no push-to-`main` run, because merged code was already tested on its PR. A weekly schedule re-runs only the security job.
-- **No wasted runs.** `cancel-in-progress` stops superseded runs, and tight job time limits stop a hung job from using up the monthly minutes.
-- **Typical cost:** about 2–3 billed minutes per PR run.
+**The repo owns *what* runs, and the shared workflows own *how*.** Callers list the same commands they run locally. The shared workflows handle setup, hardening and reporting.
 
 **Hardening:**
-- **Pinned dependencies.** Every action is pinned to a commit SHA, and the tool binaries are pinned by version and SHA256.
-- **Least-privilege token.** `permissions: {}` at the top, then minimal grants per job.
-- **No credentials left behind.** `persist-credentials: false` on every checkout.
-- **No inline inputs.** Inputs reach the shell only through `env`, never inlined into scripts, which avoids template injection.
-- **No install scripts by default.** `npm ci --ignore-scripts` stops install-time code from dependencies.
-- **Free reporting.** Results go to annotations and the job summary instead of SARIF, which needs paid Advanced Security on private repos.
-- **Never use `pull_request_target` or `secrets: inherit` in callers.**
+
+| Measure | What it means |
+|---|---|
+| Pinned dependencies | Every action is pinned to a commit SHA. Every scanner binary is pinned by version and SHA256 |
+| Least-privilege tokens | `permissions: {}` at the top, then per-job grants. Jobs that run repo code get `contents: read` only |
+| Isolated write access | Only the report job can write to the PR, and it never checks out or runs repo code |
+| No credentials left behind | `persist-credentials: false` on every checkout |
+| No template injection | Inputs reach the shell only through `env` or action inputs, never inlined into scripts |
+| No environment-file writes | Nothing writes to `GITHUB_ENV` or `GITHUB_PATH`. The scanner action passes its command as an output |
+| No install scripts by default | `npm ci --ignore-scripts` stops install-time code from dependencies |
+| Free reporting | Results go to the job logs, the summary and the PR comment instead of SARIF, which needs paid Advanced Security on private repos |
+| Caller rule | Never use `pull_request_target` or `secrets: inherit` in callers |
+
+**No duplicated logic.** Shared steps are composite actions in `actions/`: `plan`, `node-setup`, `rust-setup`, `run-check` and `scanners`. Workflows reference them, and each other, with GitHub's `$/` self-repository syntax ([July 2026](https://github.blog/changelog/2026-07-30-reference-same-repository-actions-with-self-repository-syntax/)), which resolves to this repo at the exact commit the caller pinned.
 
 ### Alternatives considered
 
 | Alternative | Why not |
 |---|---|
-| One job per tool | 2–3× the billed minutes, because every job repeats checkout and install |
+| All checks in one job | Cheaper in minutes, but one PR check and no graph. Reporting each check separately would need workarounds like the commit-status API |
 | Workflow templates or required workflows | These need an organization `.github` repo or org rulesets. Personal accounts don't have them |
-| Copy-paste per repo plus Renovate | The copies drift, and every repo gets its own update PRs for each action |
-| A fixed input per check type | More rigid and verbose than one `checks` list |
+| Copy-paste per repo | The copies drift, and every repo gets its own update PRs for each action |
+| Third-party comment and scanner actions | More supply-chain surface. `gh` and pinned binaries do the same job |
 | Floating `@v1` tags | Tags can be moved, and zizmor's default policy rejects them |
-| Shared composite action for the checks loop | See below |
-
-**About the checks loop:** `node.yml` and `rust.yml` contain the same 15-line loop, and `self-test.yml` fails if the two copies differ.
-
-- **Why not share it as a composite action?** A composite action can't be referenced from inside a reusable workflow at the same commit unless you use GitHub's `$/` syntax ([July 2026](https://github.blog/changelog/2026-07-30-reference-same-repository-actions-with-self-repository-syntax/)).
-- **Why not use `$/` now?** actionlint can't parse `$/` yet ([rhysd/actionlint#711](https://github.com/rhysd/actionlint/issues/711)).
 
 ## Development
 
-`self-test.yml` runs on every PR. It doesn't count against the minutes quota because the repo is public. It does three things:
-- Runs actionlint.
+`self-test.yml` runs on every PR, wired exactly like a caller. It doesn't count against the minutes quota because the repo is public. It does four things:
+- Runs actionlint, with only actionlint's two errors about `$/` ignored ([rhysd/actionlint#711](https://github.com/rhysd/actionlint/issues/711)). It also parse-checks the composite actions, which actionlint doesn't read.
 - Runs `node.yml` and `rust.yml` against the projects in `fixtures/`.
 - Runs `security.yml` on this repo.
+- Posts the report comment on the PR.
 
-Dependabot keeps action SHAs up to date, with a 14-day cooldown before adopting new releases. It can't update the tool binaries, so bump those by hand. They're pinned in:
+Dependabot keeps the action SHAs up to date, with a 14-day cooldown before adopting new releases. It can't update the scanner binaries:
 
-| Tool | Where |
+| Tool | Where it's pinned |
 |---|---|
-| osv-scanner | `env` in `security.yml` |
-| gitleaks | `env` in `security.yml` |
+| osv-scanner, zizmor, gitleaks | The `matrix` in `security.yml` |
 | actionlint | `env` in `self-test.yml` |
-| zizmor | the `version:` input in `security.yml` |
 
-When bumping, use releases at least 14 days old and copy the SHA256 from the release's checksums file.
+When bumping them by hand, use releases at least 14 days old and record the SHA256 of the downloaded file.
 
 **Releases** use immutable `vX.Y.Z` tags, recorded in [CHANGELOG.md](CHANGELOG.md). Callers pin to the release's commit SHA.
 
