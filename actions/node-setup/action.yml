@@ -1,0 +1,31 @@
+name: node-setup
+description: Check out the repo, set up Node, install dependencies.
+
+inputs:
+  node-version:
+    default: lts/*
+  node-version-file:
+    default: ""
+  install-command:
+    default: npm ci --ignore-scripts --no-audit --no-fund
+  working-directory:
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version-file == '' && inputs.node-version || '' }}
+        node-version-file: ${{ inputs.node-version-file != '' && format('{0}/{1}', inputs.working-directory, inputs.node-version-file) || '' }}
+
+    - name: Install
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INSTALL: ${{ inputs.install-command }}
+      run: bash -euo pipefail -c "$INSTALL"

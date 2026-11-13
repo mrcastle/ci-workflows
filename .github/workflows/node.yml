@@ -1,5 +1,4 @@
-# Reusable: install a Node project once, then run the caller's checks.
-# Usage and inputs: README.md. The checks loop is identical in rust.yml.
+# Reusable: one job per check for a Node project. Usage: README.md.
 
 name: node
 
@@ -7,11 +6,11 @@ on:
   workflow_call:
     inputs:
       checks:
-        description: 'One "name: command" per line, e.g. "lint: npm run lint". Runs in order; all run even if one fails.'
+        description: 'One "name: command" per line, e.g. "lint: npm run lint". Each becomes its own job.'
         type: string
         required: true
       node-version:
-        description: Node version. Ignored when node-version-file is set.
+        description: Ignored when node-version-file is set.
         type: string
         default: lts/*
       node-version-file:
@@ -19,60 +18,52 @@ on:
         type: string
         default: ""
       install-command:
-        description: Install command. Lifecycle scripts are off by default; drop --ignore-scripts if the project needs them (e.g. Prisma).
+        description: Lifecycle scripts are off by default; drop --ignore-scripts if the project needs them (e.g. Prisma).
         type: string
-        default: npm ci --ignore-scripts
+        default: npm ci --ignore-scripts --no-audit --no-fund
       working-directory:
         type: string
         default: "."
       timeout-minutes:
+        description: Per check job.
         type: number
         default: 10
 
 permissions: {}
 
 jobs:
-  checks:
-    name: checks
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      checks: ${{ steps.plan.outputs.checks }}
+    steps:
+      - id: plan
+        uses: $/actions/plan
+        with:
+          checks: ${{ inputs.checks }}
+
+  check:
+    needs: plan
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
-    defaults:
-      run:
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.checks) }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: $/actions/node-setup
         with:
-          persist-credentials: false
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+          node-version: ${{ inputs.node-version }}
+          node-version-file: ${{ inputs.node-version-file }}
+          install-command: ${{ inputs.install-command }}
+          working-directory: ${{ inputs.working-directory }}
+      - uses: $/actions/run-check
         with:
-          node-version: ${{ inputs.node-version-file == '' && inputs.node-version || '' }}
-          node-version-file: ${{ inputs.node-version-file != '' && format('{0}/{1}', inputs.working-directory, inputs.node-version-file) || '' }}
-
-      - name: Install
-        env:
-          INSTALL: ${{ inputs.install-command }}
-        run: bash -euo pipefail -c "$INSTALL"
-
-      - name: Checks
-        env:
-          CHECKS: ${{ inputs.checks }}
-        run: |
-          failed=0
-          printf '| Check | Result | Time |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
-          while IFS= read -r line; do
-            [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
-            if [[ ! "$line" =~ ^[[:space:]]*([A-Za-z0-9_.-]+):[[:space:]]*(.+)$ ]]; then
-              echo "::error::Invalid checks line (want \"name: command\"): $line"; failed=1; continue
-            fi
-            name="${BASH_REMATCH[1]}" cmd="${BASH_REMATCH[2]}" start=$SECONDS
-            echo "::group::$name: $cmd"
-            if bash -euo pipefail -c "$cmd" < /dev/null; then result="✅ pass"
-            else result="❌ fail"; failed=1; echo "::error title=$name failed::$cmd"; fi
-            echo "::endgroup::"
-            echo "| $name | $result | $((SECONDS - start))s |" >> "$GITHUB_STEP_SUMMARY"
-          done <<< "$CHECKS"
-          exit "$failed"
+          name: ${{ matrix.name }}
+          run: ${{ matrix.run }}
+          working-directory: ${{ inputs.working-directory }}
