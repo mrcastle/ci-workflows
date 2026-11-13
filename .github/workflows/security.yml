@@ -46,8 +46,10 @@ jobs:
           persist-credentials: false
           fetch-depth: ${{ matrix.depth }}
 
-      - uses: $/actions/scanners
+      - id: scanner
+        uses: $/actions/scanners
         with:
+          name: ${{ matrix.name }}
           bin: ${{ matrix.bin }}
           url: ${{ matrix.url }}
           sha256: ${{ matrix.sha256 }}
@@ -59,4 +61,4 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         with:
           name: ${{ matrix.name }}
-          run: bash "$CI_SCANNERS/${{ matrix.name }}.sh"
+          run: ${{ steps.scanner.outputs.command }}
