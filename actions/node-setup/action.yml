@@ -35,6 +35,7 @@ runs:
         INSTALL: ${{ inputs.install-command }}
       run: |
         bash -euo pipefail -c "$INSTALL"
+        mkdir -p node_modules # projects with no dependencies have none
         tar -czf "$RUNNER_TEMP/node_modules.tgz" node_modules
 
     - if: inputs.install == 'true'
