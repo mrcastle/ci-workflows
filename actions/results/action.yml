@@ -1,0 +1,21 @@
+name: results
+description: Collect the rows and failure details the check steps recorded, as outputs for the report job. Run with if always().
+
+outputs:
+  rows:
+    value: ${{ steps.collect.outputs.rows }}
+  details:
+    value: ${{ steps.collect.outputs.details }}
+
+runs:
+  using: composite
+  steps:
+    - id: collect
+      shell: bash
+      run: |
+        dir="$RUNNER_TEMP/ci-report" eof="EOF_$RANDOM$RANDOM"
+        for f in rows details; do
+          echo "$f<<$eof"
+          cat "$dir/$f.md" 2>/dev/null || true
+          echo "$eof"
+        done >> "$GITHUB_OUTPUT"

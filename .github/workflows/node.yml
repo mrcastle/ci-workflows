@@ -1,0 +1,113 @@
+# Reusable CI for a Node project. Usage: README.md.
+#
+#   checks: checkout → setup-node → install → lint → typecheck → test → build → osv → zizmor → gitleaks
+#   report: update the PR comment (the only job that can write to the PR)
+#
+# One install, on one machine. Leave a check's command empty to skip it. Every check runs even
+# if an earlier one failed, so one run shows every failure.
+
+name: node
+
+on:
+  workflow_call:
+    inputs:
+      install:
+        description: Lifecycle scripts are off by default; drop --ignore-scripts if the project needs them (e.g. Prisma).
+        type: string
+        default: npm ci --ignore-scripts --no-audit --no-fund
+      lint:
+        type: string
+        default: ""
+      typecheck:
+        type: string
+        default: ""
+      test:
+        type: string
+        default: ""
+      build:
+        type: string
+        default: ""
+      node-version:
+        description: Ignored when node-version-file is set.
+        type: string
+        default: lts/*
+      node-version-file:
+        description: File to read the Node version from (e.g. .nvmrc), relative to working-directory.
+        type: string
+        default: ""
+      working-directory:
+        type: string
+        default: "."
+      timeout-minutes:
+        type: number
+        default: 15
+
+permissions: {}
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      actions: read # zizmor online audits
+    outputs:
+      rows: ${{ steps.results.outputs.rows }}
+      details: ${{ steps.results.outputs.details }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # gitleaks scans the PR's commits
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version-file == '' && inputs.node-version || '' }}
+          node-version-file: ${{ inputs.node-version-file != '' && format('{0}/{1}', inputs.working-directory, inputs.node-version-file) || '' }}
+
+      - id: install
+        name: install
+        uses: $/actions/check
+        with: { name: install, run: "${{ inputs.install }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.lint != '' }}
+        uses: $/actions/check
+        with: { name: lint, run: "${{ inputs.lint }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.typecheck != '' }}
+        uses: $/actions/check
+        with: { name: typecheck, run: "${{ inputs.typecheck }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: test
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.test != '' }}
+        uses: $/actions/check
+        with: { name: test, run: "${{ inputs.test }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.build != '' }}
+        uses: $/actions/check
+        with: { name: build, run: "${{ inputs.build }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: security
+        if: ${{ !cancelled() }}
+        uses: $/actions/security
+
+      - id: results
+        if: ${{ always() }}
+        uses: $/actions/results
+
+  report:
+    needs: checks
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: $/actions/comment
+        with:
+          rows: ${{ needs.checks.outputs.rows }}
+          details: ${{ needs.checks.outputs.details }}
+          result: ${{ needs.checks.result }}

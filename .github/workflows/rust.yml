@@ -1,0 +1,98 @@
+# Reusable CI for a Rust project. Usage: README.md.
+#
+#   checks: checkout → toolchain → rust-cache → fmt → clippy → test → osv → zizmor → gitleaks
+#   report: update the PR comment (the only job that can write to the PR)
+#
+# Leave a check's command empty to skip it. Every check runs even if an earlier one failed.
+
+name: rust
+
+on:
+  workflow_call:
+    inputs:
+      fmt:
+        type: string
+        default: cargo fmt --check
+      clippy:
+        type: string
+        default: cargo clippy --all-targets --locked -- -D warnings
+      test:
+        type: string
+        default: cargo test --locked
+      toolchain:
+        description: A rust-toolchain.toml in the repo takes precedence.
+        type: string
+        default: stable
+      working-directory:
+        type: string
+        default: "."
+      timeout-minutes:
+        type: number
+        default: 20
+
+permissions: {}
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      actions: read # zizmor online audits
+    outputs:
+      rows: ${{ steps.results.outputs.rows }}
+      details: ${{ steps.results.outputs.details }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # gitleaks scans the PR's commits
+
+      # rustup is preinstalled on GitHub's Ubuntu runners.
+      - name: Install toolchain
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+        run: |
+          rustup toolchain install "$TOOLCHAIN" --profile minimal --component rustfmt,clippy
+          rustup default "$TOOLCHAIN"
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: ${{ inputs.working-directory }}
+
+      - name: fmt
+        if: ${{ !cancelled() && inputs.fmt != '' }}
+        uses: $/actions/check
+        with: { name: fmt, run: "${{ inputs.fmt }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: clippy
+        if: ${{ !cancelled() && inputs.clippy != '' }}
+        uses: $/actions/check
+        with: { name: clippy, run: "${{ inputs.clippy }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: test
+        if: ${{ !cancelled() && inputs.test != '' }}
+        uses: $/actions/check
+        with: { name: test, run: "${{ inputs.test }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: security
+        if: ${{ !cancelled() }}
+        uses: $/actions/security
+
+      - id: results
+        if: ${{ always() }}
+        uses: $/actions/results
+
+  report:
+    needs: checks
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: $/actions/comment
+        with:
+          rows: ${{ needs.checks.outputs.rows }}
+          details: ${{ needs.checks.outputs.details }}
+          result: ${{ needs.checks.result }}
