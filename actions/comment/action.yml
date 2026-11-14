@@ -1,0 +1,63 @@
+name: comment
+description: >-
+  Keep one PR comment per caller workflow in sync with the checks job's results. Created when
+  something fails; updated on every run once it exists, so it's never stale.
+
+inputs:
+  rows:
+    description: Result rows from the results action.
+    default: ""
+  details:
+    description: Failure details from the results action.
+    default: ""
+  result:
+    description: The checks job's result (needs.<job>.result).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        ROWS: ${{ inputs.rows }}
+        DETAILS: ${{ inputs.details }}
+        RESULT: ${{ inputs.result }}
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        SHA: ${{ github.event.pull_request.head.sha }}
+        WORKFLOW: ${{ github.workflow }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        [[ -n "$PR" ]] || { echo "Not a pull_request run; nothing to report."; exit 0; }
+        marker="<!-- ci-workflows:report:$WORKFLOW -->"
+
+        # A job that failed outside any check step (setup, timeout) still shows up.
+        [[ "$RESULT" == success || "$ROWS" == *❌* ]] || ROWS+=$'\n'"| job | ❌ $RESULT (see the run log) |"
+        total=$(grep -c '^|' <<< "$ROWS" || true)
+        failed=$(grep -c '❌' <<< "$ROWS" || true)
+        (( ${#DETAILS} < 50000 )) || DETAILS="Failure details are too long for a comment; see the [run log]($RUN_URL)."
+
+        {
+          echo "$marker"
+          if (( failed > 0 )); then echo "### ❌ CI: $failed of $total checks failed"
+          else echo "### ✅ CI: all $total checks passed"; fi
+          echo "Commit \`${SHA:0:7}\` · [workflow run]($RUN_URL)"
+          echo
+          echo "| Check | Result |"
+          echo "|---|---|"
+          grep -v '^$' <<< "$ROWS" || true
+          echo
+          echo "$DETAILS"
+        } > body.md
+        cat body.md >> "$GITHUB_STEP_SUMMARY"
+
+        id=$(gh api "repos/$GH_REPO/issues/$PR/comments" --paginate \
+          --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n1)
+        if [[ -n "$id" ]]; then
+          gh api -X PATCH "repos/$GH_REPO/issues/comments/$id" -F body=@body.md > /dev/null && echo "Updated comment $id"
+        elif (( failed > 0 )); then
+          gh api "repos/$GH_REPO/issues/$PR/comments" -F body=@body.md > /dev/null && echo "Created comment"
+        else
+          echo "All passing and no earlier comment; nothing to post."
+        fi || echo "::warning::Couldn't post the PR comment (read-only token, e.g. a fork PR). Results are in the job summary."

@@ -1,0 +1,23 @@
+name: check
+description: Run one check command and record its result for the PR report.
+
+inputs:
+  name:
+    description: Check name, shown in the report.
+    required: true
+  run:
+    description: Command, run with bash -euo pipefail.
+    required: true
+  working-directory:
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        NAME: ${{ inputs.name }}
+        RUN: ${{ inputs.run }}
+        SCRIPTS: ${{ github.action_path }}
+      run: bash "$SCRIPTS/check.sh"

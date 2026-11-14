@@ -1,5 +1,5 @@
 # CI for this repo, wired exactly like a caller: lint the workflows, then run node.yml
-# (install, checks, security, report) against fixtures/node. rust.yml: self-test-rust.yml.
+# (checks, report) against fixtures/node. rust.yml: self-test-rust.yml.
 
 name: self-test
 
@@ -52,6 +52,5 @@ jobs:
     with:
       working-directory: fixtures/node
       node-version-file: .nvmrc
-      checks: |
-        lint: npm run lint
-        test-unit: npm test
+      lint: npm run lint
+      test: npm test
