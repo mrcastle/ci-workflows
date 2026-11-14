@@ -1,4 +1,10 @@
-# Reusable: one job per check for a Node project. Usage: README.md.
+# Reusable CI for a Node project. Usage: README.md.
+#
+#   install ──┬─▶ <check> ─┐
+#             └─▶ <check> ─┤
+#   security ─▶ osv, zizmor, gitleaks ──▶ report
+#
+# install runs npm ci once and hands node_modules to the check jobs as a run artifact.
 
 name: node
 
@@ -32,10 +38,11 @@ on:
 permissions: {}
 
 jobs:
-  plan:
+  install:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
-    permissions: {}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
     outputs:
       checks: ${{ steps.plan.outputs.checks }}
     steps:
@@ -43,9 +50,16 @@ jobs:
         uses: $/actions/plan
         with:
           checks: ${{ inputs.checks }}
+      - uses: $/actions/node-setup
+        with:
+          install: true
+          node-version: ${{ inputs.node-version }}
+          node-version-file: ${{ inputs.node-version-file }}
+          install-command: ${{ inputs.install-command }}
+          working-directory: ${{ inputs.working-directory }}
 
   check:
-    needs: plan
+    needs: install
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -54,16 +68,29 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.checks) }}
+        include: ${{ fromJSON(needs.install.outputs.checks) }}
     steps:
       - uses: $/actions/node-setup
         with:
           node-version: ${{ inputs.node-version }}
           node-version-file: ${{ inputs.node-version-file }}
-          install-command: ${{ inputs.install-command }}
           working-directory: ${{ inputs.working-directory }}
       - uses: $/actions/run-check
         with:
           name: ${{ matrix.name }}
           run: ${{ matrix.run }}
           working-directory: ${{ inputs.working-directory }}
+
+  security:
+    permissions:
+      contents: read
+      actions: read
+    uses: $/.github/workflows/security.yml
+
+  report:
+    needs: [install, check, security]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    permissions:
+      actions: read
+      pull-requests: write
+    uses: $/.github/workflows/report.yml

@@ -1,0 +1,31 @@
+# Runs rust.yml (plan, checks, security, report) against fixtures/rust, wired like a caller.
+# Separate workflow so it gets its own report comment.
+
+name: self-test-rust
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    uses: $/.github/workflows/rust.yml
+    with:
+      working-directory: fixtures/rust
+      checks: |
+        fmt: cargo fmt --check
+        clippy: cargo clippy --all-targets --locked -- -D warnings
+        test-unit: cargo test --lib --locked
+        test-integration: cargo test --test '*' --locked

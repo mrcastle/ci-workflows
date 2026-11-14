@@ -1,4 +1,4 @@
-# Reusable: one job per check for a Rust project. Usage: README.md.
+# Reusable CI for a Rust project: plan ─▶ one job per check; security; report. Usage: README.md.
 
 name: rust
 
@@ -57,3 +57,17 @@ jobs:
           name: ${{ matrix.name }}
           run: ${{ matrix.run }}
           working-directory: ${{ inputs.working-directory }}
+
+  security:
+    permissions:
+      contents: read
+      actions: read
+    uses: $/.github/workflows/security.yml
+
+  report:
+    needs: [plan, check, security]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    permissions:
+      actions: read
+      pull-requests: write
+    uses: $/.github/workflows/report.yml

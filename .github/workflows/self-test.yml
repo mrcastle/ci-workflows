@@ -1,5 +1,5 @@
-# CI for this repo, wired exactly like a caller: lint the workflows, run node.yml
-# and rust.yml against the fixtures, run security.yml, then report on the PR.
+# CI for this repo, wired exactly like a caller: lint the workflows, then run node.yml
+# (install, checks, security, report) against fixtures/node. rust.yml: self-test-rust.yml.
 
 name: self-test
 
@@ -46,6 +46,8 @@ jobs:
   node:
     permissions:
       contents: read
+      actions: read
+      pull-requests: write
     uses: $/.github/workflows/node.yml
     with:
       working-directory: fixtures/node
@@ -53,29 +55,3 @@ jobs:
       checks: |
         lint: npm run lint
         test-unit: npm test
-
-  rust:
-    permissions:
-      contents: read
-    uses: $/.github/workflows/rust.yml
-    with:
-      working-directory: fixtures/rust
-      checks: |
-        fmt: cargo fmt --check
-        clippy: cargo clippy --all-targets --locked -- -D warnings
-        test-unit: cargo test --lib --locked
-        test-integration: cargo test --test '*' --locked
-
-  security:
-    permissions:
-      contents: read
-      actions: read
-    uses: $/.github/workflows/security.yml
-
-  report:
-    needs: [actionlint, node, rust, security]
-    if: ${{ always() && github.event_name == 'pull_request' }}
-    permissions:
-      actions: read
-      pull-requests: write
-    uses: $/.github/workflows/report.yml

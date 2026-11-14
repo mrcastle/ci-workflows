@@ -31,16 +31,18 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
+          WORKFLOW: ${{ github.workflow }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
           JOBS_API: repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}/jobs
         run: |
           [[ -n "$PR" ]] || { echo "Not a pull_request run; nothing to report."; exit 0; }
-          marker='<!-- ci-workflows:report -->'
+          # One comment per caller workflow.
+          marker="<!-- ci-workflows:report:$WORKFLOW -->"
 
-          # Finished, non-skipped jobs, minus successful plan jobs. Names look like "ci / lint".
+          # Finished, non-skipped jobs, minus successful plan/install jobs. Names look like "ci / lint".
           gh api "$JOBS_API" --paginate --jq '.jobs[]
             | select(.status == "completed" and .conclusion != "skipped")
-            | select((.conclusion == "success" and (.name | endswith("/ plan"))) | not)
+            | select((.conclusion == "success" and (.name | test("/ (plan|install)$"))) | not)
             | [.name, .conclusion, .html_url] | @tsv' | sort > jobs.tsv
           total=$(wc -l < jobs.tsv)
           failed=$(awk -F'\t' '$2 != "success"' jobs.tsv | wc -l)
