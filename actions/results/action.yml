@@ -16,6 +16,6 @@ runs:
         dir="$RUNNER_TEMP/ci-report" eof="EOF_$RANDOM$RANDOM"
         for f in rows details; do
           echo "$f<<$eof"
-          cat "$dir/$f.md" 2>/dev/null
+          cat "$dir/$f.md" 2>/dev/null || true
           echo "$eof"
         done >> "$GITHUB_OUTPUT"
