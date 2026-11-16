@@ -41,9 +41,9 @@ if (( rc == 0 )); then
   exit 0
 fi
 
-result "❌ failed (exit $rc)"
+result "❌ failed"
 {
-  echo "<details><summary>❌ <b>$NAME</b> (exit $rc)</summary>"
+  echo "<details><summary>❌ <b>$NAME</b></summary>"
   echo
   # Size caps keep one huge output from pushing every check's details out of the comment.
   if [[ -s "$CI_REPORT_MD" ]] && (( $(wc -c < "$CI_REPORT_MD") > 15000 )); then
