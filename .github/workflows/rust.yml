@@ -1,0 +1,125 @@
+# Reusable CI for a Rust project. Usage: README.md.
+#
+#   checks: checkout → osv → zizmor → toolchain → rust-cache → fmt → clippy → test
+#   report: update the PR comment (the only job that can write to the PR)
+#
+# Leave a check's command empty to skip it. Every check runs even if an earlier one failed. The
+# scanners run first, before any repo or dependency code can tamper with them.
+
+name: rust
+
+on:
+  workflow_call:
+    inputs:
+      fmt:
+        type: string
+        default: cargo fmt --check
+      clippy:
+        type: string
+        default: cargo clippy --all-targets --locked -- -D warnings
+      test:
+        type: string
+        default: cargo test --locked
+      toolchain:
+        description: Ignored when a rust-toolchain.toml pins one.
+        type: string
+        default: stable
+      working-directory:
+        type: string
+        default: "."
+      timeout-minutes:
+        type: number
+        default: 20
+
+permissions: {}
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      actions: read # zizmor online audits
+    outputs:
+      rows: ${{ steps.results.outputs.rows }}
+      details: ${{ steps.results.outputs.details }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: security
+        uses: $/actions/security
+
+      # Each check starts as "skipped" and replaces its row when it runs.
+      - name: List checks
+        if: ${{ !cancelled() }}
+        env:
+          fmt: ${{ inputs.fmt }}
+          clippy: ${{ inputs.clippy }}
+          test: ${{ inputs.test }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-report"
+          for c in fmt clippy test; do
+            [[ -z "${!c}" ]] || echo "| $c | ⏭ skipped |"
+          done >> "$RUNNER_TEMP/ci-report/rows.md"
+
+      # rustup is preinstalled on GitHub's Ubuntu runners. A rust-toolchain.toml (here or in a parent
+      # directory) pins the toolchain instead of the input, so install that one.
+      - id: toolchain
+        name: Install toolchain
+        if: ${{ !cancelled() }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          TOOLCHAIN: ${{ inputs.toolchain }}
+        run: |
+          d=$PWD
+          until [[ -f $d/rust-toolchain.toml || -f $d/rust-toolchain || $d == / ]]; do d=$(dirname "$d"); done
+          if [[ -f $d/rust-toolchain.toml || -f $d/rust-toolchain ]]; then
+            echo "Using the toolchain pinned in $d"
+            rustup toolchain install
+            rustup component add rustfmt clippy
+          else
+            rustup toolchain install "$TOOLCHAIN" --profile minimal --component rustfmt,clippy
+            rustup default "$TOOLCHAIN"
+          fi
+
+      - if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: ${{ inputs.working-directory }}
+
+      - name: fmt
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' && inputs.fmt != '' }}
+        uses: $/actions/check
+        with: { name: fmt, run: "${{ inputs.fmt }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: clippy
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' && inputs.clippy != '' }}
+        uses: $/actions/check
+        with: { name: clippy, run: "${{ inputs.clippy }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: test
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' && inputs.test != '' }}
+        uses: $/actions/check
+        with: { name: test, run: "${{ inputs.test }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - id: results
+        if: ${{ always() }}
+        uses: $/actions/results
+        with:
+          setup: ${{ steps.toolchain.outcome }}
+
+  report:
+    needs: checks
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: $/actions/comment
+        with:
+          rows: ${{ needs.checks.outputs.rows }}
+          details: ${{ needs.checks.outputs.details }}
+          result: ${{ needs.checks.result }}

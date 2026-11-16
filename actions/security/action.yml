@@ -1,0 +1,32 @@
+name: security
+description: >-
+  Run OSV-Scanner (vulnerable dependencies) and zizmor (workflow security) from the repo root.
+  Binaries are pinned by version + SHA256 here; Dependabot can't bump them (see README).
+
+runs:
+  using: composite
+  steps:
+    - name: osv
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        NAME: osv
+        RUN: bash "$SCRIPTS/osv.sh"
+        TOOL_BIN: osv-scanner
+        TOOL_URL: https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64
+        TOOL_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+        SCRIPTS: ${{ github.action_path }}
+      run: bash "$SCRIPTS/../check/check.sh"
+
+    - name: zizmor
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        NAME: zizmor
+        RUN: bash "$SCRIPTS/zizmor.sh"
+        TOOL_BIN: zizmor
+        TOOL_URL: https://github.com/zizmorcore/zizmor/releases/download/v1.31.1/zizmor-x86_64-unknown-linux-gnu.tar.gz
+        TOOL_SHA256: d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99
+        SCRIPTS: ${{ github.action_path }}
+        GH_TOKEN: ${{ github.token }} # online audits
+      run: bash "$SCRIPTS/../check/check.sh"

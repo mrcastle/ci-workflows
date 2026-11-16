@@ -1,0 +1,132 @@
+# Reusable CI for a Node project. Usage: README.md.
+#
+#   checks: checkout → osv → zizmor → setup-node → install → lint → typecheck → test → build
+#   report: update the PR comment (the only job that can write to the PR)
+#
+# One install, on one machine. Leave a check's command empty to skip it. Every check runs even
+# if an earlier one failed, so one run shows every failure. The scanners run first, before any
+# repo or dependency code can tamper with them.
+
+name: node
+
+on:
+  workflow_call:
+    inputs:
+      install:
+        description: Lifecycle scripts are off by default; drop --ignore-scripts if the project needs them (e.g. Prisma).
+        type: string
+        default: npm ci --ignore-scripts --no-audit --no-fund
+      lint:
+        type: string
+        default: ""
+      typecheck:
+        type: string
+        default: ""
+      test:
+        type: string
+        default: ""
+      build:
+        type: string
+        default: ""
+      node-version:
+        description: Ignored when node-version-file is set.
+        type: string
+        default: lts/*
+      node-version-file:
+        description: File to read the Node version from (e.g. .nvmrc), relative to working-directory.
+        type: string
+        default: ""
+      working-directory:
+        type: string
+        default: "."
+      timeout-minutes:
+        type: number
+        default: 15
+
+permissions: {}
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      actions: read # zizmor online audits
+    outputs:
+      rows: ${{ steps.results.outputs.rows }}
+      details: ${{ steps.results.outputs.details }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: security
+        uses: $/actions/security
+
+      # Each check starts as "skipped" and replaces its row when it runs.
+      - name: List checks
+        if: ${{ !cancelled() }}
+        env:
+          install: ${{ inputs.install }}
+          lint: ${{ inputs.lint }}
+          typecheck: ${{ inputs.typecheck }}
+          test: ${{ inputs.test }}
+          build: ${{ inputs.build }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-report"
+          for c in install lint typecheck test build; do
+            [[ -z "${!c}" ]] || echo "| $c | ⏭ skipped |"
+          done >> "$RUNNER_TEMP/ci-report/rows.md"
+
+      - id: setup
+        if: ${{ !cancelled() }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version-file == '' && inputs.node-version || '' }}
+          node-version-file: ${{ inputs.node-version-file != '' && format('{0}/{1}', inputs.working-directory, inputs.node-version-file) || '' }}
+
+      - id: install
+        name: install
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && inputs.install != '' }}
+        uses: $/actions/check
+        with: { name: install, run: "${{ inputs.install }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.lint != '' }}
+        uses: $/actions/check
+        with: { name: lint, run: "${{ inputs.lint }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: typecheck
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.typecheck != '' }}
+        uses: $/actions/check
+        with: { name: typecheck, run: "${{ inputs.typecheck }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: test
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.test != '' }}
+        uses: $/actions/check
+        with: { name: test, run: "${{ inputs.test }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - name: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && inputs.build != '' }}
+        uses: $/actions/check
+        with: { name: build, run: "${{ inputs.build }}", working-directory: "${{ inputs.working-directory }}" }
+
+      - id: results
+        if: ${{ always() }}
+        uses: $/actions/results
+        with:
+          setup: ${{ steps.setup.outcome }}
+
+  report:
+    needs: checks
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: $/actions/comment
+        with:
+          rows: ${{ needs.checks.outputs.rows }}
+          details: ${{ needs.checks.outputs.details }}
+          result: ${{ needs.checks.result }}

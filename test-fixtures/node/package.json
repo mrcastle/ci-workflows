@@ -1,0 +1,9 @@
+{
+  "name": "fixture-node",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "node --check src/sum.js",
+    "test": "node --test"
+  }
+}
