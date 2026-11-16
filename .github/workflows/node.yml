@@ -1,10 +1,11 @@
 # Reusable CI for a Node project. Usage: README.md.
 #
-#   checks: checkout → setup-node → install → lint → typecheck → test → build → osv → zizmor
+#   checks: checkout → osv → zizmor → setup-node → install → lint → typecheck → test → build
 #   report: update the PR comment (the only job that can write to the PR)
 #
 # One install, on one machine. Leave a check's command empty to skip it. Every check runs even
-# if an earlier one failed, so one run shows every failure.
+# if an earlier one failed, so one run shows every failure. The scanners run first, before any
+# repo or dependency code can tamper with them.
 
 name: node
 
@@ -59,13 +60,34 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: security
+        uses: $/actions/security
+
+      # Each check starts as "skipped" and replaces its row when it runs.
+      - name: List checks
+        if: ${{ !cancelled() }}
+        env:
+          install: ${{ inputs.install }}
+          lint: ${{ inputs.lint }}
+          typecheck: ${{ inputs.typecheck }}
+          test: ${{ inputs.test }}
+          build: ${{ inputs.build }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-report"
+          for c in install lint typecheck test build; do
+            [[ -z "${!c}" ]] || echo "| $c | ⏭ skipped |"
+          done >> "$RUNNER_TEMP/ci-report/rows.md"
+
+      - id: setup
+        if: ${{ !cancelled() }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ inputs.node-version-file == '' && inputs.node-version || '' }}
           node-version-file: ${{ inputs.node-version-file != '' && format('{0}/{1}', inputs.working-directory, inputs.node-version-file) || '' }}
 
       - id: install
         name: install
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && inputs.install != '' }}
         uses: $/actions/check
         with: { name: install, run: "${{ inputs.install }}", working-directory: "${{ inputs.working-directory }}" }
 
@@ -89,13 +111,11 @@ jobs:
         uses: $/actions/check
         with: { name: build, run: "${{ inputs.build }}", working-directory: "${{ inputs.working-directory }}" }
 
-      - name: security
-        if: ${{ !cancelled() }}
-        uses: $/actions/security
-
       - id: results
         if: ${{ always() }}
         uses: $/actions/results
+        with:
+          setup: ${{ steps.setup.outcome }}
 
   report:
     needs: checks

@@ -9,10 +9,16 @@ dir="$RUNNER_TEMP/ci-report"
 mkdir -p "$dir"
 export CI_REPORT_MD="$dir/$NAME.table.md"
 
-# Written now and replaced at the end, so a check killed mid-run (e.g. a timeout) still shows up.
-pending="| $NAME | ❌ didn't finish |"
-echo "$pending" >> "$dir/rows.md"
-result() { sed -i "s/^$pending\$/| $NAME | $1 |/" "$dir/rows.md"; }
+# Replace this check's row (the workflow lists each check as skipped up front), or add one.
+rows="$dir/rows.md"
+touch "$rows"
+result() {
+  awk -v key="| $NAME |" -v row="| $NAME | $1 |" \
+    'index($0, key) == 1 { print row; found = 1; next } { print } END { if (!found) print row }' \
+    "$rows" > "$rows.tmp" && mv "$rows.tmp" "$rows"
+}
+# Marked now and replaced at the end, so a check killed mid-run (e.g. a timeout) still shows up.
+result "❌ didn't finish"
 
 install_tool() {
   [[ -n "${TOOL_URL:-}" ]] || return 0
@@ -39,12 +45,16 @@ result "❌ failed (exit $rc)"
 {
   echo "<details><summary>❌ <b>$NAME</b> (exit $rc)</summary>"
   echo
-  if [[ -s "$CI_REPORT_MD" ]]; then
+  # Size caps keep one huge output from pushing every check's details out of the comment.
+  if [[ -s "$CI_REPORT_MD" ]] && (( $(wc -c < "$CI_REPORT_MD") > 15000 )); then
+    head -c 15000 "$CI_REPORT_MD" | sed '$d'
+    echo; echo "Truncated; the full table is in the job summary."
+  elif [[ -s "$CI_REPORT_MD" ]]; then
     cat "$CI_REPORT_MD"
   else
     # Escaped inside <pre>, so the output can't close the block or inject markdown/HTML.
     echo '<pre>'
-    { echo "\$ $RUN"; tail -n 60 "$dir/$NAME.log"; } \
+    { echo "\$ $RUN"; tail -n 60 "$dir/$NAME.log" | tail -c 4000; } \
       | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'
     echo '</pre>'
   fi

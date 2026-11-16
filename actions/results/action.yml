@@ -1,6 +1,11 @@
 name: results
 description: Collect the rows and failure details the check steps recorded, as outputs for the report job. Run with if always().
 
+inputs:
+  setup:
+    description: Outcome of the setup step (setup-node, the Rust toolchain). A failure adds a row, since the checks after it were skipped.
+    default: success
+
 outputs:
   rows:
     value: ${{ steps.collect.outputs.rows }}
@@ -12,10 +17,16 @@ runs:
   steps:
     - id: collect
       shell: bash
+      env:
+        SETUP: ${{ inputs.setup }}
       run: |
         dir="$RUNNER_TEMP/ci-report" eof="EOF_$RANDOM$RANDOM"
-        for f in rows details; do
-          echo "$f<<$eof"
-          cat "$dir/$f.md" 2>/dev/null || true
+        {
+          echo "rows<<$eof"
+          [[ "$SETUP" != failure ]] || echo "| setup | ❌ failed (see the run log) |"
+          cat "$dir/rows.md" 2>/dev/null || true
           echo "$eof"
-        done >> "$GITHUB_OUTPUT"
+          echo "details<<$eof"
+          cat "$dir/details.md" 2>/dev/null || true
+          echo "$eof"
+        } >> "$GITHUB_OUTPUT"

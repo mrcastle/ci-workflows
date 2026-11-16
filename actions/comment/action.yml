@@ -32,15 +32,17 @@ runs:
         [[ -n "$PR" ]] || { echo "Not a pull_request run; nothing to report."; exit 0; }
         marker="<!-- ci-workflows:report:$WORKFLOW -->"
 
-        # A job that failed outside any check step (setup, timeout) still shows up.
+        # A job that failed outside any check step (e.g. checkout) still shows up.
         [[ "$RESULT" == success || "$ROWS" == *❌* ]] || ROWS+=$'\n'"| job | ❌ $RESULT (see the run log) |"
         total=$(grep -c '^|' <<< "$ROWS" || true)
         failed=$(grep -c '❌' <<< "$ROWS" || true)
-        (( ${#DETAILS} < 50000 )) || DETAILS="Failure details are too long for a comment; see the [run log]($RUN_URL)."
+        skipped=$(grep -c '⏭' <<< "$ROWS" || true)
+        (( ${#DETAILS} < 60000 )) || DETAILS="Failure details are too long for a comment; see the [run log]($RUN_URL)."
 
         {
           echo "$marker"
-          if (( failed > 0 )); then echo "### ❌ CI: $failed of $total checks failed"
+          if (( failed > 0 && skipped > 0 )); then echo "### ❌ CI: $failed of $total checks failed, $skipped skipped"
+          elif (( failed > 0 )); then echo "### ❌ CI: $failed of $total checks failed"
           else echo "### ✅ CI: all $total checks passed"; fi
           echo "Commit \`${SHA:0:7}\` · [workflow run]($RUN_URL)"
           echo

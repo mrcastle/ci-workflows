@@ -1,9 +1,10 @@
 # Reusable CI for a Rust project. Usage: README.md.
 #
-#   checks: checkout → toolchain → rust-cache → fmt → clippy → test → osv → zizmor
+#   checks: checkout → osv → zizmor → toolchain → rust-cache → fmt → clippy → test
 #   report: update the PR comment (the only job that can write to the PR)
 #
-# Leave a check's command empty to skip it. Every check runs even if an earlier one failed.
+# Leave a check's command empty to skip it. Every check runs even if an earlier one failed. The
+# scanners run first, before any repo or dependency code can tamper with them.
 
 name: rust
 
@@ -20,7 +21,7 @@ on:
         type: string
         default: cargo test --locked
       toolchain:
-        description: A rust-toolchain.toml in the repo takes precedence.
+        description: Ignored when a rust-toolchain.toml pins one.
         type: string
         default: stable
       working-directory:
@@ -47,21 +48,44 @@ jobs:
         with:
           persist-credentials: false
 
-      # rustup is preinstalled on GitHub's Ubuntu runners.
+      - name: security
+        uses: $/actions/security
+
+      # Each check starts as "skipped" and replaces its row when it runs.
+      - name: List checks
+        if: ${{ !cancelled() }}
+        env:
+          fmt: ${{ inputs.fmt }}
+          clippy: ${{ inputs.clippy }}
+          test: ${{ inputs.test }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-report"
+          for c in fmt clippy test; do
+            [[ -z "${!c}" ]] || echo "| $c | ⏭ skipped |"
+          done >> "$RUNNER_TEMP/ci-report/rows.md"
+
+      # rustup is preinstalled on GitHub's Ubuntu runners. A rust-toolchain.toml (here or in a parent
+      # directory) pins the toolchain instead of the input, so install that one.
       - id: toolchain
         name: Install toolchain
+        if: ${{ !cancelled() }}
         working-directory: ${{ inputs.working-directory }}
         env:
           TOOLCHAIN: ${{ inputs.toolchain }}
         run: |
-          rustup toolchain install "$TOOLCHAIN" --profile minimal --component rustfmt,clippy
-          rustup default "$TOOLCHAIN"
-          # A rust-toolchain.toml overrides the default here; install it and the components fmt and
-          # clippy need. Without one, both are no-ops.
-          rustup toolchain install
-          rustup component add rustfmt clippy
+          d=$PWD
+          until [[ -f $d/rust-toolchain.toml || -f $d/rust-toolchain || $d == / ]]; do d=$(dirname "$d"); done
+          if [[ -f $d/rust-toolchain.toml || -f $d/rust-toolchain ]]; then
+            echo "Using the toolchain pinned in $d"
+            rustup toolchain install
+            rustup component add rustfmt clippy
+          else
+            rustup toolchain install "$TOOLCHAIN" --profile minimal --component rustfmt,clippy
+            rustup default "$TOOLCHAIN"
+          fi
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ${{ inputs.working-directory }}
 
@@ -80,13 +104,11 @@ jobs:
         uses: $/actions/check
         with: { name: test, run: "${{ inputs.test }}", working-directory: "${{ inputs.working-directory }}" }
 
-      - name: security
-        if: ${{ !cancelled() }}
-        uses: $/actions/security
-
       - id: results
         if: ${{ always() }}
         uses: $/actions/results
+        with:
+          setup: ${{ steps.toolchain.outcome }}
 
   report:
     needs: checks
