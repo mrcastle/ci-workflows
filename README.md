@@ -52,6 +52,7 @@ For Rust, call `rust.yml` instead. Its checks have defaults, so `with:` is optio
 - **Pin by commit SHA.** zizmor requires it. Dependabot (`package-ecosystem: github-actions`) keeps the pin current.
 - **Call each workflow once per workflow file.** The PR comment is keyed on the workflow's name, so two calls in one file would overwrite each other's comment. Use a separate file per project in a monorepo.
 - **Don't use `pull_request_target` or `secrets: inherit`** in the caller.
+- **Require the `checks` job** in branch protection or a ruleset. Its check name is `<caller job> / checks`, for example `node / checks`. Don't require `report`. It only posts the PR comment.
 
 ### Inputs
 
