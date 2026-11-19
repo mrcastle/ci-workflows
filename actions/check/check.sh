@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# Run one check ($NAME: $RUN) and record its result for the PR report.
-# Optional TOOL_URL/TOOL_SHA256/TOOL_BIN: download a checksum-verified binary onto PATH first.
-# A command can write markdown to $CI_REPORT_MD (e.g. a findings table) to replace the default
-# failure details, which are the tail of its output.
+# Optional TOOL_URL, TOOL_SHA256 and TOOL_BIN download a checksum-verified binary onto PATH first.
+# A command can write markdown to $CI_REPORT_MD to replace its failure details.
 set -uo pipefail
 
 dir="$RUNNER_TEMP/ci-report"
 mkdir -p "$dir"
 export CI_REPORT_MD="$dir/$NAME.table.md"
 
-# Replace this check's row (the workflow lists each check as skipped up front), or add one.
 rows="$dir/rows.md"
 touch "$rows"
 result() {
@@ -23,7 +20,7 @@ result "❌ didn't finish"
 install_tool() {
   [[ -n "${TOOL_URL:-}" ]] || return 0
   mkdir -p "$RUNNER_TEMP/bin"
-  curl -fsSLo "$RUNNER_TEMP/download" "$TOOL_URL" || return
+  curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/download" "$TOOL_URL" || return
   echo "$TOOL_SHA256  $RUNNER_TEMP/download" | sha256sum -c - || return
   if [[ "$TOOL_URL" == *.tar.gz ]]; then tar -xzf "$RUNNER_TEMP/download" -C "$RUNNER_TEMP/bin" "$TOOL_BIN" || return
   else mv "$RUNNER_TEMP/download" "$RUNNER_TEMP/bin/$TOOL_BIN"; fi

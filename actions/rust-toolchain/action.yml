@@ -1,0 +1,22 @@
+name: rust-toolchain
+description: >-
+  Install the Rust toolchain with rustfmt and clippy. A rust-toolchain.toml in working-directory
+  or a parent directory takes precedence over the toolchain input.
+
+inputs:
+  toolchain:
+    description: Toolchain to install when no rust-toolchain.toml pins one.
+    default: stable
+  working-directory:
+    description: Project root to start the rust-toolchain.toml search from.
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Install toolchain
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        TOOLCHAIN: ${{ inputs.toolchain }}
+      run: bash "$GITHUB_ACTION_PATH/toolchain.sh"

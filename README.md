@@ -101,15 +101,17 @@ For Rust, call `rust.yml` instead. Its checks have defaults, so `with:` is optio
 | `.github/workflows/node.yml`, `rust.yml` | The reusable workflows |
 | `actions/check` | Runs one check and records its result |
 | `actions/security` | Runs OSV-Scanner and zizmor |
+| `actions/rust-toolchain` | Installs the Rust toolchain |
 | `actions/results` | Hands the results to the report job |
 | `actions/comment` | Updates the PR comment |
+| `.github/actions/actionlint` | Lints this repo's workflows (self-test only) |
 | `test-fixtures/` | Minimal projects for the self-tests |
 
-The actions are referenced with GitHub's `$/` self-repository syntax, so they run from the same commit the caller pinned.
+Each action keeps its script in a `.sh` file next to its `action.yml`. The actions are referenced with GitHub's `$/` self-repository syntax, so they run from the same commit the caller pinned.
 
 On every PR, `self-test.yml` runs actionlint, parse-checks the composite actions, and runs `node.yml` against `test-fixtures/node`. `self-test-rust.yml` runs `rust.yml` against `test-fixtures/rust`.
 
-Dependabot can't update the scanner and actionlint binaries. Bump them by hand in `actions/security/action.yml` and `self-test.yml`, and record the SHA256 of each download.
+Dependabot can't update the scanner and actionlint binaries. Bump them by hand in `actions/security/action.yml` and `.github/actions/actionlint/action.yml`, and record the SHA256 of each download.
 
 ## License
 
