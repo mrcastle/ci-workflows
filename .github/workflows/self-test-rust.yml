@@ -1,5 +1,4 @@
-# Runs rust.yml (checks, report) against test-fixtures/rust, wired like a caller.
-# Separate workflow so it gets its own report comment.
+# Separate from self-test.yml so it gets its own PR comment.
 
 name: self-test-rust
 

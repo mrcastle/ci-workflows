@@ -1,31 +1,26 @@
-# Reusable CI for a Node project. Usage: README.md.
-#
-#   checks: checkout → osv → zizmor → setup-node → install → lint → typecheck → test → build
-#   report: update the PR comment (the only job that can write to the PR)
-#
-# One install, on one machine. Leave a check's command empty to skip it. Every check runs even
-# if an earlier one failed, so one run shows every failure. The scanners run first, before any
-# repo or dependency code can tamper with them.
-
 name: node
 
 on:
   workflow_call:
     inputs:
       install:
-        description: Lifecycle scripts are off by default; drop --ignore-scripts if the project needs them (e.g. Prisma).
+        description: Install command. Lifecycle scripts are off by default; drop --ignore-scripts if the project needs them (e.g. Prisma).
         type: string
         default: npm ci --ignore-scripts --no-audit --no-fund
       lint:
+        description: Lint command. Empty skips it.
         type: string
         default: ""
       typecheck:
+        description: Typecheck command. Empty skips it.
         type: string
         default: ""
       test:
+        description: Test command. Empty skips it.
         type: string
         default: ""
       build:
+        description: Build command. Empty skips it.
         type: string
         default: ""
       node-version:
@@ -37,9 +32,11 @@ on:
         type: string
         default: ""
       working-directory:
+        description: Project root. The security scans always cover the whole repo.
         type: string
         default: "."
       timeout-minutes:
+        description: Time limit for the checks job.
         type: number
         default: 15
 
@@ -62,21 +59,6 @@ jobs:
 
       - name: security
         uses: $/actions/security
-
-      # Each check starts as "skipped" and replaces its row when it runs.
-      - name: List checks
-        if: ${{ !cancelled() }}
-        env:
-          install: ${{ inputs.install }}
-          lint: ${{ inputs.lint }}
-          typecheck: ${{ inputs.typecheck }}
-          test: ${{ inputs.test }}
-          build: ${{ inputs.build }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/ci-report"
-          for c in install lint typecheck test build; do
-            [[ -z "${!c}" ]] || echo "| $c | ⏭ skipped |"
-          done >> "$RUNNER_TEMP/ci-report/rows.md"
 
       - id: setup
         if: ${{ !cancelled() }}
@@ -115,6 +97,8 @@ jobs:
         if: ${{ always() }}
         uses: $/actions/results
         with:
+          checks: install lint typecheck test build
+          commands: ${{ toJSON(inputs) }}
           setup: ${{ steps.setup.outcome }}
 
   report:

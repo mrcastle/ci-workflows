@@ -1,0 +1,19 @@
+name: actionlint
+description: >-
+  Lint this repo's workflows with actionlint, and parse-check the composite actions. For this
+  repo's self-test only. The binary is pinned by version + SHA256 here; Dependabot can't bump it.
+
+runs:
+  using: composite
+  steps:
+    - name: actionlint
+      shell: bash
+      env:
+        ACTIONLINT_VERSION: 1.7.12
+        ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      run: bash "$GITHUB_ACTION_PATH/actionlint.sh"
+
+    - name: Parse actions
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/parse.sh"

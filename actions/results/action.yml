@@ -1,32 +1,35 @@
 name: results
-description: Collect the rows and failure details the check steps recorded, as outputs for the report job. Run with if always().
+description: >-
+  Collect the rows and failure details the check steps recorded, as outputs for the report job.
+  A check that has a command but didn't run shows as skipped. Run with if always().
 
 inputs:
+  checks:
+    description: The workflow's check names, space-separated, in report order.
+    required: true
+  commands:
+    description: The workflow's inputs as JSON (toJSON(inputs)), to find which checks have a command.
+    required: true
   setup:
     description: Outcome of the setup step (setup-node, the Rust toolchain). A failure adds a row, since the checks after it were skipped.
     default: success
 
 outputs:
   rows:
+    description: Markdown table rows, one per check.
     value: ${{ steps.collect.outputs.rows }}
   details:
+    description: Markdown failure details for the checks that failed.
     value: ${{ steps.collect.outputs.details }}
 
 runs:
   using: composite
   steps:
     - id: collect
+      name: Collect results
       shell: bash
       env:
+        CHECKS: ${{ inputs.checks }}
+        COMMANDS: ${{ inputs.commands }}
         SETUP: ${{ inputs.setup }}
-      run: |
-        dir="$RUNNER_TEMP/ci-report" eof="EOF_$RANDOM$RANDOM"
-        {
-          echo "rows<<$eof"
-          [[ "$SETUP" != failure ]] || echo "| setup | ❌ failed (see the run log) |"
-          cat "$dir/rows.md" 2>/dev/null || true
-          echo "$eof"
-          echo "details<<$eof"
-          cat "$dir/details.md" 2>/dev/null || true
-          echo "$eof"
-        } >> "$GITHUB_OUTPUT"
+      run: bash "$GITHUB_ACTION_PATH/results.sh"

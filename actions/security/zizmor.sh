@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# GitHub Actions workflow security. Full findings go to the log; a table goes to the PR report.
 set -uo pipefail
 
 zizmor --format plain .

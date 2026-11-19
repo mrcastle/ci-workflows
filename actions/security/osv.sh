@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Known-vulnerable dependencies in any lockfile. Ignore one with a reason in osv-scanner.toml.
 set -uo pipefail
 
 json="$RUNNER_TEMP/osv.json"
